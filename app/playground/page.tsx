@@ -1,3 +1,5 @@
+import ImageUpload from "@/components/ImageUpload";
+
 export default function Playground() {
   return (
     <main className="min-h-screen bg-gray-50 px-6 py-16">
@@ -17,31 +19,15 @@ export default function Playground() {
         </div>
 
         <div className="mt-12 grid gap-8 md:grid-cols-2">
-          {/* Person */}
-          <div className="rounded-2xl bg-white p-8 shadow-sm">
-            <h2 className="text-xl font-semibold">
-              Person image
-            </h2>
+          <ImageUpload
+            title="Person image"
+            description="Choose a clear photo of the person."
+          />
 
-            <div className="mt-6 flex min-h-64 items-center justify-center rounded-xl border-2 border-dashed border-gray-300">
-              <p className="text-gray-500">
-                Person image upload will come here
-              </p>
-            </div>
-          </div>
-
-          {/* Garment */}
-          <div className="rounded-2xl bg-white p-8 shadow-sm">
-            <h2 className="text-xl font-semibold">
-              Garment image
-            </h2>
-
-            <div className="mt-6 flex min-h-64 items-center justify-center rounded-xl border-2 border-dashed border-gray-300">
-              <p className="text-gray-500">
-                Garment image upload will come here
-              </p>
-            </div>
-          </div>
+          <ImageUpload
+            title="Garment image"
+            description="Choose a clear photo of the garment."
+          />
         </div>
 
         <div className="mt-8 rounded-2xl bg-white p-8 shadow-sm">
@@ -51,7 +37,7 @@ export default function Playground() {
 
           <textarea
             className="mt-4 min-h-32 w-full rounded-xl border border-gray-300 p-4 outline-none focus:border-purple-500"
-            defaultValue="Take the person from image 1 and dress them in the item shown in image 2, keeping the person&apos;s pose, facial identity, hair, body proportions, lighting, and background unchanged, only replacing or adding the item with realistic color, fabric, and fit for a seamless, photorealistic try-on."
+            defaultValue="Take the person from image 1 and dress them in the item shown in image 2, keeping the person's pose, facial identity, hair, body proportions, lighting, and background unchanged, only replacing or adding the item with realistic color, fabric, and fit for a seamless, photorealistic try-on."
           />
         </div>
 
@@ -68,3 +54,4 @@ export default function Playground() {
     </main>
   );
 }
+
