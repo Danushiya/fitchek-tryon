@@ -5,11 +5,13 @@ import { useState } from "react";
 type ImageUploadProps = {
   title: string;
   description: string;
+  onFileSelect: (file: File) => void;
 };
 
 export default function ImageUpload({
   title,
   description,
+  onFileSelect,
 }: ImageUploadProps) {
   const [preview, setPreview] = useState<string | null>(null);
 
@@ -25,6 +27,7 @@ export default function ImageUpload({
     const imageUrl = URL.createObjectURL(file);
 
     setPreview(imageUrl);
+    onFileSelect(file);
   }
 
   return (

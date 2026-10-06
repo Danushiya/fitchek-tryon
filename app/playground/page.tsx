@@ -1,6 +1,14 @@
+"use client";
+
+import { useState } from "react";
 import ImageUpload from "@/components/ImageUpload";
 
 export default function Playground() {
+  const [personFile, setPersonFile] = useState<File | null>(null);
+  const [garmentFile, setGarmentFile] = useState<File | null>(null);
+
+  const canGenerate = personFile !== null && garmentFile !== null;
+
   return (
     <main className="min-h-screen bg-gray-50 px-6 py-16">
       <div className="mx-auto max-w-5xl">
@@ -22,11 +30,13 @@ export default function Playground() {
           <ImageUpload
             title="Person image"
             description="Choose a clear photo of the person."
+            onFileSelect={setPersonFile}
           />
 
           <ImageUpload
             title="Garment image"
             description="Choose a clear photo of the garment."
+            onFileSelect={setGarmentFile}
           />
         </div>
 
@@ -44,8 +54,12 @@ export default function Playground() {
         <div className="mt-8 text-center">
           <button
             type="button"
-            disabled
-            className="rounded-full bg-gray-300 px-8 py-4 font-semibold text-gray-600"
+            disabled={!canGenerate}
+            className={`rounded-full px-8 py-4 font-semibold ${
+              canGenerate
+                ? "bg-purple-600 text-white hover:bg-purple-700"
+                : "cursor-not-allowed bg-gray-300 text-gray-600"
+            }`}
           >
             Generate
           </button>
@@ -54,4 +68,3 @@ export default function Playground() {
     </main>
   );
 }
-
