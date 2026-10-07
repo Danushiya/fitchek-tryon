@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { getGuestId } from "@/lib/guest";
 
 type ImageUploadProps = {
   title: string;
@@ -14,8 +15,9 @@ export default function ImageUpload({
   onFileSelect,
 }: ImageUploadProps) {
   const [preview, setPreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
-  function handleImageChange(
+  async function handleImageChange(
     event: React.ChangeEvent<HTMLInputElement>,
   ) {
     const file = event.target.files?.[0];
@@ -28,6 +30,53 @@ export default function ImageUpload({
 
     setPreview(imageUrl);
     onFileSelect(file);
+
+    try {
+      setUploading(true);
+
+      const guestId = getGuestId();
+
+      const response = await fetch("/api/upload-url", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          guestId,
+          fileName: file.name,
+          fileType: file.type,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to create upload URL");
+      }
+
+      const { path, token } = data;
+
+      const uploadResponse = await fetch(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/upload/sign/tryon/${path}?token=${token}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": file.type,
+          },
+          body: file,
+        },
+      );
+
+      if (!uploadResponse.ok) {
+        throw new Error("Image upload failed");
+      }
+
+      console.log("Image uploaded successfully:", path);
+    } catch (error) {
+      console.error("Upload error:", error);
+    } finally {
+      setUploading(false);
+    }
   }
 
   return (
@@ -64,6 +113,12 @@ export default function ImageUpload({
           className="hidden"
         />
       </label>
+
+      {uploading && (
+        <p className="mt-3 text-sm text-gray-500">
+          Uploading...
+        </p>
+      )}
     </div>
   );
 }
