@@ -6,7 +6,7 @@ import { getGuestId } from "@/lib/guest";
 type ImageUploadProps = {
   title: string;
   description: string;
-  onFileSelect: (file: File) => void;
+  onFileSelect: (file: File, path: string) => void;
 };
 
 export default function ImageUpload({
@@ -27,9 +27,7 @@ export default function ImageUpload({
     }
 
     const imageUrl = URL.createObjectURL(file);
-
     setPreview(imageUrl);
-    onFileSelect(file);
 
     try {
       setUploading(true);
@@ -51,7 +49,9 @@ export default function ImageUpload({
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to create upload URL");
+        throw new Error(
+          data.error || "Failed to create upload URL",
+        );
       }
 
       const { path, token } = data;
@@ -70,6 +70,8 @@ export default function ImageUpload({
       if (!uploadResponse.ok) {
         throw new Error("Image upload failed");
       }
+
+      onFileSelect(file, path);
 
       console.log("Image uploaded successfully:", path);
     } catch (error) {
