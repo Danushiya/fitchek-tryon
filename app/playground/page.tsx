@@ -1,11 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getGuestId } from "@/lib/guest";
 import ImageUpload from "@/components/ImageUpload";
 
 export default function Playground() {
   const [personFile, setPersonFile] = useState<File | null>(null);
   const [garmentFile, setGarmentFile] = useState<File | null>(null);
+  const [guestId, setGuestId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setGuestId(getGuestId());
+  }, []);
 
   const canGenerate = personFile !== null && garmentFile !== null;
 
