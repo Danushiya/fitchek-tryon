@@ -7,10 +7,21 @@ import ImageUpload from "@/components/ImageUpload";
 export default function Playground() {
   const [personFile, setPersonFile] = useState<File | null>(null);
   const [garmentFile, setGarmentFile] = useState<File | null>(null);
+
   const [guestId, setGuestId] = useState<string | null>(null);
+
   const [personPath, setPersonPath] = useState<string | null>(null);
   const [garmentPath, setGarmentPath] = useState<string | null>(null);
+
   const [generating, setGenerating] = useState(false);
+  const [generationStatus, setGenerationStatus] = useState<string | null>(
+    null,
+  );
+
+  const [resultPath, setResultPath] = useState<string | null>(null);
+  const [generationError, setGenerationError] = useState<string | null>(
+    null,
+  );
 
   const [prompt, setPrompt] = useState(
     "Take the person from image 1 and dress them in the item shown in image 2, keeping the person's pose, facial identity, hair, body proportions, lighting, and background unchanged, only replacing or adding the item with realistic color, fabric, and fit for a seamless, photorealistic try-on.",
@@ -33,7 +44,11 @@ export default function Playground() {
 
     try {
       setGenerating(true);
+      setGenerationStatus("Starting generation...");
+      setGenerationError(null);
+      setResultPath(null);
 
+      // 1. Start the generation
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: {
@@ -50,20 +65,144 @@ export default function Playground() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Generation failed");
+        throw new Error(
+          data.error || "Failed to start generation",
+        );
       }
 
-      console.log("Generation created:", data.generation);
+      const generationId = data.generation?.id;
+
+      if (!generationId) {
+        throw new Error("Generation ID was not returned");
+      }
+
+      console.log("Generation created:", generationId);
+
+      // 2. Poll the generation
+      await pollGeneration(generationId);
     } catch (error) {
       console.error("Generation error:", error);
+
+      setGenerationStatus(null);
+
+      setGenerationError(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while generating the image.",
+      );
     } finally {
       setGenerating(false);
     }
   }
 
+  async function pollGeneration(generationId: string) {
+    const maxAttempts = 75;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const response = await fetch(
+        `/api/generate/${generationId}`,
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error || "Failed to check generation status",
+        );
+      }
+
+      const status = data.runpod?.status;
+
+      console.log(
+        `Generation status (${attempt + 1}/${maxAttempts}):`,
+        status,
+      );
+
+      if (status === "IN_QUEUE") {
+        setGenerationStatus(
+          "Your request is waiting in the generation queue...",
+        );
+      }
+
+      if (status === "IN_PROGRESS") {
+        setGenerationStatus(
+          "AI is creating your try-on image...",
+        );
+      }
+
+      if (status === "COMPLETED") {
+        setGenerationStatus(
+          "Generation completed. Loading your result...",
+        );
+
+        const resultPath = data.generation?.result_path;
+
+        if (!resultPath) {
+          throw new Error(
+            "Generation completed but the result image was not saved.",
+          );
+        }
+
+        // Get the signed URL for the private result
+        const resultResponse = await fetch(
+          `/api/generate/${generationId}/result`,
+          {
+            method: "GET",
+            cache: "no-store",
+          },
+        );
+
+        const resultData = await resultResponse.json();
+
+        if (!resultResponse.ok) {
+          throw new Error(
+            resultData.error ||
+              "Failed to load generated image",
+          );
+        }
+
+        setResultPath(resultData.imageUrl);
+        setGenerationStatus(null);
+
+        return;
+      }
+
+      if (
+        status === "FAILED" ||
+        status === "CANCELLED" ||
+        status === "TIMED_OUT"
+      ) {
+        throw new Error(
+          data.generation?.error ||
+            `Generation ${status.toLowerCase()}. Please try again.`,
+        );
+      }
+
+      // Wait 4 seconds before checking again
+      await new Promise((resolve) =>
+        setTimeout(resolve, 4000),
+      );
+    }
+
+    throw new Error(
+      "Generation took too long and timed out. Please try again.",
+    );
+  }
+
+  function handleTryAgain() {
+    setGenerationError(null);
+    setGenerationStatus(null);
+    setResultPath(null);
+  }
+
   return (
     <main className="min-h-screen bg-gray-50 px-6 py-16">
       <div className="mx-auto max-w-5xl">
+        {/* Header */}
         <div className="text-center">
           <p className="text-sm font-semibold uppercase tracking-[0.3em] text-purple-600">
             AI Virtual Try-On
@@ -74,10 +213,12 @@ export default function Playground() {
           </h1>
 
           <p className="mt-4 text-gray-600">
-            Upload a person photo and a garment photo to get started.
+            Upload a person photo and a garment photo to get
+            started.
           </p>
         </div>
 
+        {/* Uploads */}
         <div className="mt-12 grid gap-8 md:grid-cols-2">
           <ImageUpload
             title="Person image"
@@ -85,6 +226,8 @@ export default function Playground() {
             onFileSelect={(file, path) => {
               setPersonFile(file);
               setPersonPath(path);
+              setResultPath(null);
+              setGenerationError(null);
             }}
           />
 
@@ -94,10 +237,13 @@ export default function Playground() {
             onFileSelect={(file, path) => {
               setGarmentFile(file);
               setGarmentPath(path);
+              setResultPath(null);
+              setGenerationError(null);
             }}
           />
         </div>
 
+        {/* Prompt */}
         <div className="mt-8 rounded-2xl bg-white p-8 shadow-sm">
           <h2 className="text-xl font-semibold">
             Prompt
@@ -106,10 +252,12 @@ export default function Playground() {
           <textarea
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
-            className="mt-4 min-h-32 w-full rounded-xl border border-gray-300 p-4 outline-none focus:border-purple-500"
+            disabled={generating}
+            className="mt-4 min-h-32 w-full rounded-xl border border-gray-300 p-4 outline-none focus:border-purple-500 disabled:bg-gray-100"
           />
         </div>
 
+        {/* Generate */}
         <div className="mt-8 text-center">
           <button
             type="button"
@@ -121,9 +269,73 @@ export default function Playground() {
                 : "cursor-not-allowed bg-gray-300 text-gray-600"
             }`}
           >
-            {generating ? "Creating..." : "Generate"}
+            {generating ? "Generating..." : "Generate"}
           </button>
         </div>
+
+        {/* Loading */}
+        {generating && (
+          <div className="mt-8 rounded-2xl bg-white p-8 text-center shadow-sm">
+            <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-purple-600" />
+
+            <p className="mt-5 text-lg font-semibold">
+              {generationStatus || "Generating your try-on..."}
+            </p>
+
+            <p className="mt-2 text-sm text-gray-500">
+              This can take a little while. Please keep this
+              page open.
+            </p>
+          </div>
+        )}
+
+        {/* Error */}
+        {generationError && !generating && (
+          <div className="mt-8 rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
+            <p className="text-lg font-semibold text-red-700">
+              Generation failed
+            </p>
+
+            <p className="mt-2 text-sm text-red-600">
+              {generationError}
+            </p>
+
+            <button
+              type="button"
+              onClick={handleTryAgain}
+              className="mt-5 rounded-full bg-red-600 px-6 py-3 font-semibold text-white hover:bg-red-700"
+            >
+              Try Again
+            </button>
+          </div>
+        )}
+
+        {/* Result */}
+        {resultPath && !generating && (
+          <div className="mt-8 rounded-2xl bg-white p-8 shadow-sm">
+            <h2 className="text-center text-2xl font-semibold">
+              Your Try-On Result
+            </h2>
+
+            <div className="mt-6 flex justify-center">
+              <img
+                src={resultPath}
+                alt="AI generated try-on result"
+                className="max-h-[700px] w-auto rounded-2xl object-contain shadow-md"
+              />
+            </div>
+
+            <div className="mt-6 text-center">
+              <a
+                href={resultPath}
+                download="fitchek-tryon-result.webp"
+                className="inline-block rounded-full bg-purple-600 px-8 py-3 font-semibold text-white hover:bg-purple-700"
+              >
+                Download Result
+              </a>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );
