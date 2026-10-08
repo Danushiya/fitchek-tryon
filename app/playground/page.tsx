@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { getGuestId } from "@/lib/guest";
 import ImageUpload from "@/components/ImageUpload";
 
+const ACTIVE_GENERATION_KEY = "fitchek_active_generation_id";
+
 export default function Playground() {
   const [personFile, setPersonFile] = useState<File | null>(null);
   const [garmentFile, setGarmentFile] = useState<File | null>(null);
@@ -36,64 +38,6 @@ export default function Playground() {
     garmentFile !== null &&
     personPath !== null &&
     garmentPath !== null;
-
-  async function handleGenerate() {
-    if (!canGenerate || !personPath || !garmentPath || !guestId) {
-      return;
-    }
-
-    try {
-      setGenerating(true);
-      setGenerationStatus("Starting generation...");
-      setGenerationError(null);
-      setResultPath(null);
-
-      // 1. Start the generation
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          guestId,
-          personPath,
-          garmentPath,
-          prompt,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.error || "Failed to start generation",
-        );
-      }
-
-      const generationId = data.generation?.id;
-
-      if (!generationId) {
-        throw new Error("Generation ID was not returned");
-      }
-
-      console.log("Generation created:", generationId);
-
-      // 2. Poll the generation
-      await pollGeneration(generationId);
-    } catch (error) {
-      console.error("Generation error:", error);
-
-      setGenerationStatus(null);
-
-      setGenerationError(
-        error instanceof Error
-          ? error.message
-          : "Something went wrong while generating the image.",
-      );
-    } finally {
-      setGenerating(false);
-    }
-  }
 
   async function pollGeneration(generationId: string) {
     const maxAttempts = 75;
@@ -142,12 +86,13 @@ export default function Playground() {
         const resultPath = data.generation?.result_path;
 
         if (!resultPath) {
+          localStorage.removeItem(ACTIVE_GENERATION_KEY);
+
           throw new Error(
             "Generation completed but the result image was not saved.",
           );
         }
 
-        // Get the signed URL for the private result
         const resultResponse = await fetch(
           `/api/generate/${generationId}/result`,
           {
@@ -166,6 +111,9 @@ export default function Playground() {
         }
 
         setResultPath(resultData.imageUrl);
+
+        localStorage.removeItem(ACTIVE_GENERATION_KEY);
+
         setGenerationStatus(null);
 
         return;
@@ -176,27 +124,152 @@ export default function Playground() {
         status === "CANCELLED" ||
         status === "TIMED_OUT"
       ) {
+        localStorage.removeItem(ACTIVE_GENERATION_KEY);
+
         throw new Error(
           data.generation?.error ||
             `Generation ${status.toLowerCase()}. Please try again.`,
         );
       }
 
-      // Wait 4 seconds before checking again
       await new Promise((resolve) =>
         setTimeout(resolve, 4000),
       );
     }
+
+    localStorage.removeItem(ACTIVE_GENERATION_KEY);
 
     throw new Error(
       "Generation took too long and timed out. Please try again.",
     );
   }
 
+  useEffect(() => {
+    const activeGenerationId = localStorage.getItem(
+      ACTIVE_GENERATION_KEY,
+    );
+
+    if (!activeGenerationId) {
+      return;
+    }
+
+    async function resumeGeneration() {
+      try {
+        setGenerating(true);
+        setGenerationError(null);
+        setGenerationStatus(
+          "Resuming your generation...",
+        );
+        setResultPath(null);
+
+        await pollGeneration(activeGenerationId);
+      } catch (error) {
+        console.error(
+          "Generation resume error:",
+          error,
+        );
+
+        setGenerationStatus(null);
+
+        setGenerationError(
+          error instanceof Error
+            ? error.message
+            : "Something went wrong while resuming the generation.",
+        );
+      } finally {
+        setGenerating(false);
+      }
+    }
+
+    resumeGeneration();
+  }, []);
+
+  async function handleGenerate() {
+    if (
+      !canGenerate ||
+      !personPath ||
+      !garmentPath ||
+      !guestId
+    ) {
+      return;
+    }
+
+    try {
+      setGenerating(true);
+      setGenerationStatus("Starting generation...");
+      setGenerationError(null);
+      setResultPath(null);
+
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          guestId,
+          personPath,
+          garmentPath,
+          prompt,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error || "Failed to start generation",
+        );
+      }
+
+      const generationId = data.generation?.id;
+
+      if (!generationId) {
+        throw new Error(
+          "Generation ID was not returned",
+        );
+      }
+
+      localStorage.setItem(
+        ACTIVE_GENERATION_KEY,
+        generationId,
+      );
+
+      console.log(
+        "Generation created:",
+        generationId,
+      );
+
+      await pollGeneration(generationId);
+    } catch (error) {
+      console.error(
+        "Generation error:",
+        error,
+      );
+
+      localStorage.removeItem(
+        ACTIVE_GENERATION_KEY,
+      );
+
+      setGenerationStatus(null);
+
+      setGenerationError(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while generating the image.",
+      );
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   function handleTryAgain() {
     setGenerationError(null);
     setGenerationStatus(null);
     setResultPath(null);
+
+    localStorage.removeItem(
+      ACTIVE_GENERATION_KEY,
+    );
   }
 
   return (
@@ -251,7 +324,9 @@ export default function Playground() {
 
           <textarea
             value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
+            onChange={(event) =>
+              setPrompt(event.target.value)
+            }
             disabled={generating}
             className="mt-4 min-h-32 w-full rounded-xl border border-gray-300 p-4 outline-none focus:border-purple-500 disabled:bg-gray-100"
           />
@@ -269,7 +344,9 @@ export default function Playground() {
                 : "cursor-not-allowed bg-gray-300 text-gray-600"
             }`}
           >
-            {generating ? "Generating..." : "Generate"}
+            {generating
+              ? "Generating..."
+              : "Generate"}
           </button>
         </div>
 
@@ -279,7 +356,8 @@ export default function Playground() {
             <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-purple-600" />
 
             <p className="mt-5 text-lg font-semibold">
-              {generationStatus || "Generating your try-on..."}
+              {generationStatus ||
+                "Generating your try-on..."}
             </p>
 
             <p className="mt-2 text-sm text-gray-500">
