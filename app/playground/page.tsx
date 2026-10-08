@@ -153,16 +153,16 @@ export default function Playground() {
       return;
     }
 
+    const generationId = activeGenerationId;
+
     async function resumeGeneration() {
       try {
         setGenerating(true);
         setGenerationError(null);
-        setGenerationStatus(
-          "Resuming your generation...",
-        );
+        setGenerationStatus("Resuming your generation...");
         setResultPath(null);
 
-        await pollGeneration(activeGenerationId);
+        await pollGeneration(generationId);
       } catch (error) {
         console.error(
           "Generation resume error:",
