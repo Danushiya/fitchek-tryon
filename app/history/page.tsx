@@ -20,6 +20,8 @@ export default function HistoryPage() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedItem, setSelectedItem] =
+    useState<HistoryItem | null>(null);
 
   useEffect(() => {
     async function loadHistory() {
@@ -118,9 +120,11 @@ export default function HistoryPage() {
 
         <div className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {history.map((item) => (
-            <div
+            <button
               key={item.id}
-              className="overflow-hidden rounded-xl border bg-white shadow-sm"
+              type="button"
+              onClick={() => setSelectedItem(item)}
+              className="w-full overflow-hidden rounded-xl border bg-white text-left shadow-sm transition hover:shadow-md"
             >
               <div className="grid grid-cols-2 gap-2 p-3">
                 <div>
@@ -203,10 +207,112 @@ export default function HistoryPage() {
                   </p>
                 )}
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </div>
+
+      {selectedItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setSelectedItem(null)}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold">
+                Generation Details
+              </h2>
+
+              <button
+                type="button"
+                onClick={() => setSelectedItem(null)}
+                className="rounded-lg px-3 py-2 text-gray-500 hover:bg-gray-100"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-6 md:grid-cols-3">
+              {selectedItem.personUrl && (
+                <div>
+                  <p className="mb-2 font-medium">
+                    Person
+                  </p>
+
+                  <img
+                    src={selectedItem.personUrl}
+                    alt="Person"
+                    className="w-full rounded-lg object-cover"
+                  />
+                </div>
+              )}
+
+              {selectedItem.garmentUrl && (
+                <div>
+                  <p className="mb-2 font-medium">
+                    Garment
+                  </p>
+
+                  <img
+                    src={selectedItem.garmentUrl}
+                    alt="Garment"
+                    className="w-full rounded-lg object-cover"
+                  />
+                </div>
+              )}
+
+              {selectedItem.resultUrl && (
+                <div>
+                  <p className="mb-2 font-medium">
+                    Result
+                  </p>
+
+                  <img
+                    src={selectedItem.resultUrl}
+                    alt="Generated try-on result"
+                    className="w-full rounded-lg object-cover"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 rounded-lg bg-gray-50 p-4">
+              <p className="text-sm font-medium">
+                Prompt
+              </p>
+
+              <p className="mt-2 text-sm text-gray-600">
+                {selectedItem.prompt}
+              </p>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-4 text-sm text-gray-500">
+              <span>
+                Status:{" "}
+                <strong className="capitalize">
+                  {selectedItem.status}
+                </strong>
+              </span>
+
+              <span>
+                Date:{" "}
+                {new Date(
+                  selectedItem.createdAt,
+                ).toLocaleString()}
+              </span>
+            </div>
+
+            {selectedItem.error && (
+              <div className="mt-4 rounded-lg bg-red-50 p-4 text-sm text-red-600">
+                {selectedItem.error}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </main>
   );
 }
