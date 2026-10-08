@@ -349,10 +349,10 @@ fitchek-tryon/
 │
 | 
 |── components/
-│   │   ├── Navbar.tsx
-│   │   └── ImageUpload.tsx
-│   │
-│   └── lib/
+│      ├── Navbar.tsx
+│      └── ImageUpload.tsx
+│   
+│── lib/
 │       ├── guest.ts
 │       └── supabase/
 │           └── server.ts
