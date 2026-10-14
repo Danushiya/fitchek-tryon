@@ -406,7 +406,7 @@ export default function Playground() {
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             disabled={generating}
-            className="mt-4 min-h-32 w-full rounded-xl border border-gray-300 p-4 outline-none focus:border-purple-500 disabled:bg-gray-100"
+            className="mt-4 min-h-32 w-full rounded-xl border border-gray-300 p-4 text-black italic outline-none focus:border-purple-500 disabled:bg-gray-100"
           />
         </section>
 
