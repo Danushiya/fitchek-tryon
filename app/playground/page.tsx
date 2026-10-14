@@ -1,10 +1,10 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
 import { getGuestId } from "@/lib/guest";
 import ImageUpload from "@/components/ImageUpload";
 import LiveTryOn from "@/components/LiveTryOn";
+import SamplePickerModal from "@/components/SamplePickerModal";
 
 const ACTIVE_GENERATION_KEY = "fitchek_active_generation_id";
 
@@ -45,7 +45,10 @@ export default function Playground() {
     useState<string | null>(null);
   const [sampleLoading, setSampleLoading] = useState(false);
   const [sampleError, setSampleError] = useState<string | null>(null);
-
+  const [sampleModal, setSampleModal] = useState<
+    "person" | "garment" | null
+  >(null);
+  
   const [prompt, setPrompt] = useState(
     "Take the person from image 1 and dress them in the item shown in image 2, keeping the person's pose, facial identity, hair, body proportions, lighting, and background unchanged, only replacing or adding the item with realistic color, fabric, and fit for a seamless, photorealistic try-on.",
   );
@@ -97,9 +100,7 @@ export default function Playground() {
     const signedData = await signedResponse.json();
 
     if (!signedResponse.ok) {
-      throw new Error(
-        signedData.error || "Could not prepare sample upload.",
-      );
+      throw new Error(signedData.error || "Could not prepare sample upload.");
     }
 
     const uploadResponse = await fetch(
@@ -118,9 +119,9 @@ export default function Playground() {
     return { file, path: signedData.path };
   }
 
-  async function handleTrySamples() {
-    if (!selectedPersonSample || !selectedGarmentSample || sampleLoading) {
-      setSampleError("Please select both a person and a garment sample.");
+  async function handleLoadPersonSample() {
+    if (!selectedPersonSample || sampleLoading || generating) {
+      setSampleError("Please select a person sample first.");
       return;
     }
 
@@ -130,13 +131,36 @@ export default function Playground() {
     setResultPath(null);
 
     try {
-      const [person, garment] = await Promise.all([
-        uploadSample(selectedPersonSample),
-        uploadSample(selectedGarmentSample),
-      ]);
+      const person = await uploadSample(selectedPersonSample);
 
       setPersonFile(person.file);
       setPersonPath(person.path);
+      setGenerationStatus(null);
+    } catch (error) {
+      setSampleError(
+        error instanceof Error
+          ? error.message
+          : "Could not upload the person sample.",
+      );
+    } finally {
+      setSampleLoading(false);
+    }
+  }
+
+  async function handleLoadGarmentSample() {
+    if (!selectedGarmentSample || sampleLoading || generating) {
+      setSampleError("Please select a garment sample first.");
+      return;
+    }
+
+    setSampleLoading(true);
+    setSampleError(null);
+    setGenerationError(null);
+    setResultPath(null);
+
+    try {
+      const garment = await uploadSample(selectedGarmentSample);
+
       setGarmentFile(garment.file);
       setGarmentPath(garment.path);
       setGenerationStatus(null);
@@ -144,7 +168,7 @@ export default function Playground() {
       setSampleError(
         error instanceof Error
           ? error.message
-          : "Could not load sample images.",
+          : "Could not upload the garment sample.",
       );
     } finally {
       setSampleLoading(false);
@@ -169,9 +193,7 @@ export default function Playground() {
       const status = data.runpod?.status;
 
       if (status === "IN_QUEUE") {
-        setGenerationStatus(
-          "Your request is waiting in the generation queue...",
-        );
+        setGenerationStatus("Your request is waiting in the generation queue...");
       }
 
       if (status === "IN_PROGRESS") {
@@ -228,9 +250,7 @@ export default function Playground() {
     }
 
     localStorage.removeItem(ACTIVE_GENERATION_KEY);
-    throw new Error(
-      "Generation took too long and timed out. Please try again.",
-    );
+    throw new Error("Generation took too long and timed out. Please try again.");
   }
 
   useEffect(() => {
@@ -346,6 +366,10 @@ export default function Playground() {
               setGenerationError(null);
               setSampleError(null);
             }}
+            onTrySamples={() => {
+              setSampleError(null);
+              setSampleModal("person");
+            }}
           />
 
           <ImageUpload
@@ -359,119 +383,21 @@ export default function Playground() {
               setGenerationError(null);
               setSampleError(null);
             }}
+            onTrySamples={() => {
+              setSampleError(null);
+              setSampleModal("garment");
+            }}
           />
         </div>
 
-        {/* Sample gallery */}
-        <section className="mt-10 rounded-3xl border border-purple-100 bg-white p-6 shadow-sm md:p-8">
-          <div className="text-center">
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-purple-600">
-              Quick start
-            </p>
-            <h2 className="mt-2 text-2xl font-bold text-gray-900">
-              Try Samples
-            </h2>
-            <p className="mt-2 text-sm text-gray-500">
-              Select one person and one garment, then load your samples.
-            </p>
-          </div>
-
-          <h3 className="mt-8 font-semibold text-gray-800">
-            1. Choose a person
-          </h3>
-
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
-            {PERSON_SAMPLES.map((src, index) => (
-              <button
-                key={src}
-                type="button"
-                onClick={() => {
-                  setSelectedPersonSample(src);
-                  setSampleError(null);
-                }}
-                aria-pressed={selectedPersonSample === src}
-                className={`overflow-hidden rounded-xl border-2 transition ${
-                  selectedPersonSample === src
-                    ? "border-purple-600 ring-2 ring-purple-200"
-                    : "border-gray-200 hover:border-purple-300"
-                }`}
-              >
-                <img
-                  src={src}
-                  alt={`Person sample ${index + 1}`}
-                  className="h-36 w-full object-cover"
-                />
-                <span className="block py-2 text-xs font-medium text-gray-700">
-                  {selectedPersonSample === src
-                    ? "Selected ✓"
-                    : `Person ${index + 1}`}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          <h3 className="mt-8 font-semibold text-gray-800">
-            2. Choose a garment
-          </h3>
-
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
-            {GARMENT_SAMPLES.map((src, index) => (
-              <button
-                key={src}
-                type="button"
-                onClick={() => {
-                  setSelectedGarmentSample(src);
-                  setSampleError(null);
-                }}
-                aria-pressed={selectedGarmentSample === src}
-                className={`overflow-hidden rounded-xl border-2 transition ${
-                  selectedGarmentSample === src
-                    ? "border-purple-600 ring-2 ring-purple-200"
-                    : "border-gray-200 hover:border-purple-300"
-                }`}
-              >
-                <img
-                  src={src}
-                  alt={`Garment sample ${index + 1}`}
-                  className="h-36 w-full bg-gray-50 object-contain p-2"
-                />
-                <span className="block py-2 text-xs font-medium text-gray-700">
-                  {selectedGarmentSample === src
-                    ? "Selected ✓"
-                    : `Garment ${index + 1}`}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          {sampleError && (
-            <p
-              role="alert"
-              className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700"
-            >
-              {sampleError}
-            </p>
-          )}
-
-          <div className="mt-6 text-center">
-            <button
-              type="button"
-              onClick={handleTrySamples}
-              disabled={
-                !selectedPersonSample ||
-                !selectedGarmentSample ||
-                sampleLoading ||
-                generating
-              }
-              className="rounded-full bg-purple-600 px-8 py-3 font-semibold text-white transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-300"
-            >
-              {sampleLoading ? "Loading samples..." : "Use Selected Samples"}
-            </button>
-            <p className="mt-2 text-xs text-gray-500">
-              The selected images will be uploaded securely before generation.
-            </p>
-          </div>
-        </section>
+        {sampleError && (
+          <p
+            role="alert"
+            className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+          >
+            {sampleError}
+          </p>
+        )}
 
         {/* Prompt */}
         <section className="mt-8 rounded-2xl bg-white p-8 shadow-sm">
@@ -560,6 +486,39 @@ export default function Playground() {
       <div className="mx-auto mt-16 max-w-6xl">
         <LiveTryOn />
       </div>
+
+      <SamplePickerModal
+        open={sampleModal === "person"}
+        title="Choose a person sample"
+        samples={PERSON_SAMPLES}
+        selectedSample={selectedPersonSample}
+        onSelect={setSelectedPersonSample}
+        onClose={() => setSampleModal(null)}
+        onProceed={() => {
+          if (!selectedPersonSample || sampleLoading || generating) return;
+
+          setSampleModal(null);
+          void handleLoadPersonSample();
+        }}
+        loading={sampleLoading}
+      />
+
+      <SamplePickerModal
+        open={sampleModal === "garment"}
+        title="Choose a garment sample"
+        samples={GARMENT_SAMPLES}
+        selectedSample={selectedGarmentSample}
+        onSelect={setSelectedGarmentSample}
+        onClose={() => setSampleModal(null)}
+        onProceed={() => {
+          if (!selectedGarmentSample || sampleLoading || generating) return;
+
+          setSampleModal(null);
+          void handleLoadGarmentSample();
+        }}
+        loading={sampleLoading}
+      />
+
     </main>
   );
 }
