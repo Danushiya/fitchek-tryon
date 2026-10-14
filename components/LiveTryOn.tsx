@@ -21,6 +21,10 @@ export default function LiveTryOn() {
     null,
   );
   const mountedRef = useRef(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const previewUrlRef = useRef<string | null>(null);
+  const stopMessageRef = useRef("Live try-on ended.");
 
   const [garmentFile, setGarmentFile] = useState<File | null>(null);
   const [running, setRunning] = useState(false);
@@ -29,33 +33,29 @@ export default function LiveTryOn() {
   const [error, setError] = useState<string | null>(null);
 
   const [sampleModalOpen, setSampleModalOpen] = useState(false);
-  const [selectedGarmentSample, setSelectedGarmentSample] =
-    useState<string | null>(null);
+  const [selectedGarmentSample, setSelectedGarmentSample] = useState<string | null>(null);
   const [sampleLoading, setSampleLoading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    mountedRef.current = true;
+  mountedRef.current = true;
 
-    return () => {
-      mountedRef.current = false;
+  return () => {
+    mountedRef.current = false;
 
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-
-      clientRef.current?.disconnect();
-      clientRef.current = null;
-
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    };
-  }, []);
-
-  async function stopSession(message = "Live try-on ended.") {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
     }
+
+    const recorder = recorderRef.current;
+
+    if (recorder && recorder.state !== "inactive") {
+      recorder.onstop = null;
+      recorder.stop();
+    }
+
+    recorderRef.current = null;
+    recordedChunksRef.current = [];
 
     clientRef.current?.disconnect();
     clientRef.current = null;
@@ -63,151 +63,336 @@ export default function LiveTryOn() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
 
-    if (cameraVideoRef.current) {
-      cameraVideoRef.current.srcObject = null;
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
     }
+  };
+}, []);
 
-    if (resultVideoRef.current) {
-      resultVideoRef.current.srcObject = null;
-    }
+  async function finishSession(message: string) {
+  clientRef.current?.disconnect();
+  clientRef.current = null;
 
-    if (mountedRef.current) {
-      setRunning(false);
-      setSecondsLeft(0);
-      setStatus(message);
-    }
+  streamRef.current?.getTracks().forEach((track) => track.stop());
+  streamRef.current = null;
+
+  if (cameraVideoRef.current) {
+    cameraVideoRef.current.srcObject = null;
   }
 
-  async function startSession() {
-    if (!garmentFile || running) {
-      setError("Please select a garment image first.");
-      return;
+  if (resultVideoRef.current) {
+    resultVideoRef.current.srcObject = null;
+  }
+
+  if (mountedRef.current) {
+    setRunning(false);
+    setSecondsLeft(0);
+    setStatus(message);
+  }
+}
+
+function stopSession(message = "Live try-on ended.") {
+  if (timeoutRef.current) {
+    clearTimeout(timeoutRef.current);
+    timeoutRef.current = null;
+  }
+
+  stopMessageRef.current = message;
+
+  const recorder = recorderRef.current;
+
+  if (recorder && recorder.state !== "inactive") {
+    setStatus("Finalizing your recorded try-on...");
+    recorder.stop();
+    return;
+  }
+
+  finishSession(message);
+}
+  
+
+async function startSession() {
+  if (!garmentFile || running || previewUrl) {
+    setError(
+      previewUrl
+        ? "Close the recorded preview before starting another session."
+        : "Please select a garment image first.",
+    );
+    return;
+  }
+
+  setError(null);
+  setStatus("Requesting camera access...");
+  setSecondsLeft(SESSION_DURATION_SECONDS);
+  recordedChunksRef.current = [];
+
+  let cameraStream: MediaStream | null = null;
+  let realtimeClient: RealTimeClient | null = null;
+
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: "user",
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+    });
+
+    streamRef.current = cameraStream;
+
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = cameraStream;
+      await cameraVideoRef.current.play();
     }
 
-    setError(null);
-    setStatus("Requesting camera access...");
-    setSecondsLeft(SESSION_DURATION_SECONDS);
+    setStatus("Connecting to Decart...");
 
-    let cameraStream: MediaStream | null = null;
-    let realtimeClient: RealTimeClient | null = null;
+    const client = createDecartClient({
+      apiKeyProvider: async () => {
+        const response = await fetch("/api/realtime-token", {
+          method: "POST",
+          cache: "no-store",
+        });
 
-    try {
-      cameraStream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: "user",
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-      });
+        const data = await response.json();
 
-      streamRef.current = cameraStream;
+        if (!response.ok || !data.apiKey) {
+          throw new Error(
+            data.error || "Could not authorize the Decart session.",
+          );
+        }
 
-      if (cameraVideoRef.current) {
-        cameraVideoRef.current.srcObject = cameraStream;
-        await cameraVideoRef.current.play();
-      }
+        return data.apiKey as string;
+      },
+    });
 
-      setStatus("Connecting to Decart...");
+    const model = models.realtime("lucy-vton-3.6");
 
-      const client = createDecartClient({
-        apiKeyProvider: async () => {
-          const response = await fetch("/api/realtime-token", {
-            method: "POST",
-            cache: "no-store",
+    // Convert the selected garment image to JPEG for Decart.
+    const decartGarment = await convertToJpeg(garmentFile);
+
+    realtimeClient = await client.realtime.connect(cameraStream, {
+      model,
+      mirror: "auto",
+      initialState: {
+        image: decartGarment,
+      },
+
+      onRemoteStream: (transformedStream) => {
+        // Display Decart's transformed video.
+        if (resultVideoRef.current) {
+          resultVideoRef.current.srcObject = transformedStream;
+
+          void resultVideoRef.current.play().catch(() => {
+            // Playback may require browser interaction.
           });
+        }
 
-          const data = await response.json();
-
-          if (!response.ok || !data.apiKey) {
-            throw new Error(
-              data.error || "Could not authorize the Decart session.",
-            );
-          }
-
-          return data.apiKey as string;
-        },
-      });
-
-      const model = models.realtime("lucy-vton-3.6");
-
-      realtimeClient = await client.realtime.connect(cameraStream, {
-        model,
-        mirror: "auto",
-        initialState: {
-          image: garmentFile,
-        },
-        onRemoteStream: (transformedStream) => {
-          if (resultVideoRef.current) {
-            resultVideoRef.current.srcObject = transformedStream;
-            void resultVideoRef.current.play().catch(() => {
-              // Playback can require a browser interaction.
-            });
-          }
-        },
-        onConnectionChange: (connectionState) => {
-          if (mountedRef.current) {
-            setStatus(`Decart connection: ${connectionState}`);
-          }
-        },
-      });
-
-      clientRef.current = realtimeClient;
-
-      if (!mountedRef.current) {
-        realtimeClient.disconnect();
-        cameraStream.getTracks().forEach((track) => track.stop());
-        return;
-      }
-
-      setRunning(true);
-      setStatus("Live try-on is running.");
-
-      // Enforce a hard 10-second limit, even if the UI is not updated.
-      timeoutRef.current = setTimeout(() => {
-        void stopSession("10-second preview complete.");
-      }, SESSION_DURATION_SECONDS * 1000);
-
-      const startedAt = Date.now();
-
-      const countdown = () => {
-        if (!mountedRef.current || !clientRef.current) {
+        // Record only Decart's transformed output.
+        if (recorderRef.current) {
           return;
         }
 
-        const remaining = Math.max(
-          0,
-          SESSION_DURATION_SECONDS -
-            Math.floor((Date.now() - startedAt) / 1000),
-        );
+        try {
+          const mimeTypeCandidates = [
+            "video/webm;codecs=vp9",
+            "video/webm;codecs=vp8",
+            "video/webm",
+            "video/mp4",
+          ];
 
-        setSecondsLeft(remaining);
+          const supportedMimeType = mimeTypeCandidates.find((type) =>
+            MediaRecorder.isTypeSupported(type),
+          );
 
-        if (remaining > 0) {
-          window.setTimeout(countdown, 250);
+          const recorder = supportedMimeType
+            ? new MediaRecorder(transformedStream, {
+                mimeType: supportedMimeType,
+              })
+            : new MediaRecorder(transformedStream);
+
+          recordedChunksRef.current = [];
+          recorderRef.current = recorder;
+
+          recorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              recordedChunksRef.current.push(event.data);
+            }
+          };
+
+          recorder.onerror = () => {
+            if (mountedRef.current) {
+              setError("Recording failed. Please try again.");
+            }
+          };
+
+          recorder.onstop = () => {
+            const chunks = recordedChunksRef.current;
+            recordedChunksRef.current = [];
+            recorderRef.current = null;
+
+            if (chunks.length > 0) {
+              const blob = new Blob(chunks, {
+                type: recorder.mimeType || "video/webm",
+              });
+
+              if (blob.size > 0 && mountedRef.current) {
+                const url = URL.createObjectURL(blob);
+
+                if (previewUrlRef.current) {
+                  URL.revokeObjectURL(previewUrlRef.current);
+                }
+
+                previewUrlRef.current = url;
+                setPreviewUrl(url);
+
+                finishSession(
+                  "Your recorded try-on is ready. Enjoy the looping preview!",
+                );
+                return;
+              }
+            }
+
+            finishSession(stopMessageRef.current);
+          };
+
+          recorder.start();
+        } catch (cause) {
+          setError(
+            cause instanceof Error
+              ? `Could not record the Decart output: ${cause.message}`
+              : "Could not record the Decart output.",
+          );
+
+          void stopSession("Recording could not start.");
         }
-      };
+      },
 
-      countdown();
-    } catch (cause) {
-      realtimeClient?.disconnect();
-      cameraStream?.getTracks().forEach((track) => track.stop());
+      onConnectionChange: (connectionState) => {
+        if (mountedRef.current) {
+          setStatus(`Decart connection: ${connectionState}`);
+        }
+      },
+    });
 
-      streamRef.current = null;
-      clientRef.current = null;
+    clientRef.current = realtimeClient;
 
-      if (mountedRef.current) {
-        setRunning(false);
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "Unable to start live try-on.",
-        );
-        setStatus("Live try-on could not start.");
+    if (!mountedRef.current) {
+      realtimeClient.disconnect();
+      cameraStream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+
+    setRunning(true);
+    setStatus("Live try-on is running.");
+
+    // Enforce the 10-second session limit.
+    timeoutRef.current = setTimeout(() => {
+      void stopSession("10-second preview complete.");
+    }, SESSION_DURATION_SECONDS * 1000);
+
+    const startedAt = Date.now();
+
+    const countdown = () => {
+      if (!mountedRef.current || !clientRef.current) {
+        return;
       }
+
+      const remaining = Math.max(
+        0,
+        SESSION_DURATION_SECONDS -
+          Math.floor((Date.now() - startedAt) / 1000),
+      );
+
+      setSecondsLeft(remaining);
+
+      if (remaining > 0) {
+        window.setTimeout(countdown, 250);
+      }
+    };
+
+    countdown();
+  } catch (cause) {
+    realtimeClient?.disconnect();
+    cameraStream?.getTracks().forEach((track) => track.stop());
+
+    streamRef.current = null;
+    clientRef.current = null;
+
+    if (mountedRef.current) {
+      setRunning(false);
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Unable to start live try-on.",
+      );
+      setStatus("Live try-on could not start.");
     }
   }
+}
 
+
+  async function endPreview() {
+  if (previewUrlRef.current) {
+    URL.revokeObjectURL(previewUrlRef.current);
+    previewUrlRef.current = null;
+  }
+
+  setPreviewUrl(null);
+  recordedChunksRef.current = [];
+
+  if (resultVideoRef.current) {
+    resultVideoRef.current.pause();
+    resultVideoRef.current.srcObject = null;
+    resultVideoRef.current.removeAttribute("src");
+    resultVideoRef.current.load();
+  }
+
+  setStatus("Preview closed. Choose a garment to try again.");
+}
+
+
+async function convertToJpeg(file: File): Promise<File> {
+  const imageUrl = URL.createObjectURL(file);
+
+  try {
+    const image = new Image();
+    image.src = imageUrl;
+    await image.decode();
+
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("Could not prepare the garment image.");
+    }
+
+    context.drawImage(image, 0, 0);
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (result) => {
+          if (result) resolve(result);
+          else reject(new Error("Could not convert garment to JPEG."));
+        },
+        "image/jpeg",
+        0.92,
+      );
+    });
+
+    return new File(
+      [blob],
+      `${file.name.replace(/\.[^.]+$/, "")}.jpg`,
+      { type: "image/jpeg" },
+    );
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
 
 async function handleLiveTryOnSample() {
   if (!selectedGarmentSample || sampleLoading || running) return;
@@ -224,9 +409,11 @@ async function handleLiveTryOnSample() {
 
     const blob = await response.blob();
     const filename = selectedGarmentSample.split("/").pop() || "garment.jpg";
-    const file = new File([blob], filename, {
-      type: blob.type || "image/jpeg",
+    const originalFile = new File([blob], filename, {
+      type: blob.type || "application/octet-stream",
     });
+
+    const file = await convertToJpeg(originalFile);
 
     setGarmentFile(file);
     setSampleModalOpen(false);
@@ -255,12 +442,12 @@ async function handleLiveTryOnSample() {
             <div>
               <div className="flex flex-wrap items-center gap-3">
                 <h2 className="text-2xl font-bold text-gray-900">
-                  Decart Live Try-On
+                  Live Try-On
                 </h2>
               </div>
 
               <p className="mt-3 leading-7 text-slate-600">
-                Experience real-time virtual try-on with Decart. Get a live
+                Experience real-time virtual try-on. Get a live
                 video feed of yourself wearing the selected outfit. Limited
                 to <strong className="text-slate-900">10 seconds</strong> per
                 session.
@@ -297,7 +484,7 @@ async function handleLiveTryOnSample() {
               <button
                 type="button"
                 onClick={() => setSampleModalOpen(true)}
-                disabled={running}
+                disabled={running || !!previewUrl}
                 className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50"
               >
                 <span aria-hidden="true">⤨</span>
@@ -353,16 +540,12 @@ async function handleLiveTryOnSample() {
             </p>
           )}
         </div>
-
-        {/* Right: Live video preview */}
+        
+        {/* Right: Live video and recorded preview */}
         <div className="relative flex min-h-[300px] flex-col items-center justify-center overflow-hidden rounded-2xl border border-indigo-100 bg-slate-50 p-4 sm:min-h-[380px]">
-          <div
-            className={`grid w-full gap-3 ${
-              running ? "grid-cols-2" : "grid-cols-1"
-            }`}
-          >
-            {running && (
-              <div>
+          {running ? (
+            <div className="grid w-full grid-cols-2 gap-3">
+              <div className="min-w-0">
                 <p className="mb-2 text-sm font-semibold text-slate-700">
                   Camera
                 </p>
@@ -374,41 +557,70 @@ async function handleLiveTryOnSample() {
                   className="aspect-[3/4] w-full rounded-xl bg-gray-950 object-cover"
                 />
               </div>
-            )}
 
-            <div className="min-w-0">
-              {running && (
+              <div className="min-w-0">
                 <p className="mb-2 text-sm font-semibold text-slate-700">
                   Live result
                 </p>
-              )}
-
-              <video
-                ref={resultVideoRef}
-                autoPlay
-                muted
-                playsInline
-                className={`${
-                  running ? "aspect-[3/4]" : "aspect-video"
-                } w-full rounded-xl bg-gray-950 object-cover`}
-              />
-
-              {!running && (
-                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
-                  <div className="mb-5 flex h-24 w-24 items-center justify-center rounded-full bg-indigo-100 text-5xl text-blue-500">
-                    ▣
-                  </div>
-                  <p className="font-semibold text-slate-700">
-                    Your live try-on video will appear here
+                <video
+                  ref={resultVideoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className="aspect-[3/4] w-full rounded-xl bg-gray-950 object-cover"
+                />
+              </div>
+            </div>
+          ) : previewUrl ? (
+            <div className="w-full">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-900">
+                    Your AI Try-On Replay
                   </p>
-                  <p className="mt-2 text-sm text-slate-500">
-                    Click “Start Live Try-On” to begin
+                  <p className="mt-1 text-sm text-slate-500">
+                    Recorded Video output
                   </p>
                 </div>
-              )}
+
+                <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
+                  ✨ Replay
+                </span>
+              </div>
+
+              <video
+                key={previewUrl}
+                src={previewUrl}
+                autoPlay
+                loop
+                muted
+                playsInline
+                className="aspect-[3/4] max-h-[520px] w-full rounded-xl bg-gray-950 object-contain"
+              />
+
+              <button
+                type="button"
+                onClick={endPreview}
+                className="mt-4 w-full rounded-xl bg-gradient-to-r from-violet-600 to-blue-500 px-5 py-3 font-semibold text-white shadow-md transition hover:brightness-105"
+              >
+                ✕ End Preview
+              </button>
             </div>
-          </div>
+          ) : (
+            <div className="p-6 text-center">
+              <div className="mb-5 flex h-24 w-24 items-center justify-center rounded-full bg-indigo-100 text-5xl text-blue-500">
+                ▣
+              </div>
+              <p className="font-semibold text-slate-700">
+                Your recorded try-on will appear here
+              </p>
+              <p className="mt-2 text-sm text-slate-500">
+                Start a live session to create your 10-second preview.
+              </p>
+            </div>
+          )}
         </div>
+
       </div>
       <SamplePickerModal
         open={sampleModalOpen}

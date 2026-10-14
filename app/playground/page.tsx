@@ -12,18 +12,19 @@ const PERSON_SAMPLES = [
   "/women7.jpg",
   "/women2.jpg",
   "/women3.jpg",
-  "/women8.jpg",
-  "/women5.jpg",
-  "/women10.jpg",
+  "/men1.jpg",
+  "/men5.jpg",
+  "/men3.jpg",
 ];
 
 const GARMENT_SAMPLES = [
   "/garment10.jpg",
-  "/garment2.avif",
   "/garment3.webp",
-  "/garment4.jpg",
   "/garment5.jpg",
-  "/garment6.jpg",
+  "/garment13.jpg",
+  "/garment14.jpg",
+  "/garment15.jpg",
+
 ];
 
 export default function Playground() {
@@ -355,50 +356,48 @@ export default function Playground() {
 
         {/* Image uploads */}
         <div className="mt-12 grid gap-8 md:grid-cols-2">
-          <ImageUpload
-            title="Person image"
-            description="Choose a clear photo of the person."
-            onFileSelect={(file, path) => {
-              setPersonFile(file);
-              setPersonPath(path);
-              setSelectedPersonSample(null);
-              setResultPath(null);
-              setGenerationError(null);
-              setSampleError(null);
-            }}
-            onTrySamples={() => {
-              setSampleError(null);
-              setSampleModal("person");
-            }}
-          />
+          {/* Person image section */}
+          <div>
+            <ImageUpload
+              title="Person image"
+              description="Choose a clear photo of the person."
+              samplePreview={selectedPersonSample}
+              onFileSelect={(file, path) => {
+                setPersonFile(file);
+                setPersonPath(path);
+                setSelectedPersonSample(null);
+                setResultPath(null);
+                setGenerationError(null);
+                setSampleError(null);
+              }}
+              onTrySamples={() => {
+                setSampleError(null);
+                setSampleModal("person");
+              }}
+            />
+          </div>
 
-          <ImageUpload
-            title="Garment image"
-            description="Choose a clear photo of the garment."
-            onFileSelect={(file, path) => {
-              setGarmentFile(file);
-              setGarmentPath(path);
-              setSelectedGarmentSample(null);
-              setResultPath(null);
-              setGenerationError(null);
-              setSampleError(null);
-            }}
-            onTrySamples={() => {
-              setSampleError(null);
-              setSampleModal("garment");
-            }}
-          />
+          {/* Garment image section */}
+          <div>
+            <ImageUpload
+              title="Garment image"
+              description="Choose a clear photo of the garment."
+              samplePreview={selectedGarmentSample}
+              onFileSelect={(file, path) => {
+                setGarmentFile(file);
+                setGarmentPath(path);
+                setSelectedGarmentSample(null);
+                setResultPath(null);
+                setGenerationError(null);
+                setSampleError(null);
+              }}
+              onTrySamples={() => {
+                setSampleError(null);
+                setSampleModal("garment");
+              }}
+            />
+          </div>
         </div>
-
-        {sampleError && (
-          <p
-            role="alert"
-            className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
-          >
-            {sampleError}
-          </p>
-        )}
-
         {/* Prompt */}
         <section className="mt-8 rounded-2xl bg-white p-8 shadow-sm">
           <h2 className="text-xl font-semibold text-gray-900">Prompt</h2>
@@ -482,7 +481,7 @@ export default function Playground() {
         )}
       </div>
 
-      {/* Decart live try-on */}
+      {/* Live try-on */}
       <div className="mx-auto mt-16 max-w-6xl">
         <LiveTryOn />
       </div>

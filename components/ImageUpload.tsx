@@ -9,6 +9,7 @@ type ImageUploadProps = {
   description: string;
   onFileSelect: (file: File, path: string) => void;
   onTrySamples: () => void;
+  samplePreview?: string | null;
 };
 
 export default function ImageUpload({
@@ -16,6 +17,7 @@ export default function ImageUpload({
   description,
   onFileSelect,
   onTrySamples,
+  samplePreview,
 }: ImageUploadProps) {
   const [preview, setPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -151,9 +153,9 @@ export default function ImageUpload({
         aria-label={`Upload ${title}`}
         className="group flex min-h-48 w-full flex-col items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-indigo-200 bg-gradient-to-br from-slate-50 to-indigo-50/40 p-4 text-center transition duration-200 hover:border-violet-400 hover:bg-violet-50/50 disabled:cursor-wait disabled:opacity-70 sm:min-h-52"
       >
-        {preview ? (
+        {preview || samplePreview ? (
           <img
-            src={preview}
+            src={preview || samplePreview || ""}
             alt={`${title} preview`}
             className="max-h-56 w-full rounded-lg object-contain"
           />

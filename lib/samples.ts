@@ -10,4 +10,9 @@ export const GARMENT_SAMPLES = [
   "/garment8.jpg",
   "/garment9.jpg",
   "/garment10.jpg",
+  "/garment11.jpg",
+  "/garment12.jpg",
+  "/garment13.jpg",
+  "/garment14.jpg",
+  "/garment15.jpg",
 ];
